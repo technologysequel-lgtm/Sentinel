@@ -1776,39 +1776,25 @@
       if (countNote) countNote.style.opacity = '1';
     }
 
-    // Fetch current count — stale-while-revalidate strategy
-    // 1. Show cached count instantly (no waiting)
-    // 2. Refresh from GAS in the background, update if changed
-    const CACHE_KEY = 'sentinel_wl_count';
-    const CACHE_TTL = 5 * 60 * 1000; // revalidate at most every 5 minutes
-
+    // Fetch current count from Google Sheets via GAS on page load
     async function fetchCount() {
-      // ── Step 1: Show cached value immediately ──────────────────────────────
-      try {
-        const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
-        if (cached && typeof cached.count === 'number') {
-          renderCount(cached.count); // instant — no network wait
-          // If cache is fresh enough, skip the network call entirely
-          if (Date.now() - cached.ts < CACHE_TTL) return;
-        }
-      } catch (_) { /* ignore parse errors */ }
+      // Safety net: if fetch hasn't resolved within 3s, reveal spans with fallback text
+      const fallbackTimer = setTimeout(() => renderCount(0), 3000);
 
-      // ── Step 2: Revalidate in the background ──────────────────────────────
       if (!GAS_URL || GAS_URL === 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE') {
-        renderCount(0); // no GAS configured — show fallback
+        clearTimeout(fallbackTimer);
+        renderCount(0);
         return;
       }
       gasReady = true;
       try {
         const res = await fetch(GAS_URL, { method: 'GET' });
         const data = await res.json();
-        if (typeof data.count === 'number') {
-          localStorage.setItem(CACHE_KEY, JSON.stringify({ count: data.count, ts: Date.now() }));
-          renderCount(data.count); // silently update UI if count changed
-        }
+        clearTimeout(fallbackTimer);
+        if (typeof data.count === 'number') renderCount(data.count);
       } catch (_) {
-        // Network failed — cached value (or fallback) is already shown, do nothing
-        renderCount(liveCount || 0);
+        clearTimeout(fallbackTimer);
+        renderCount(0); // reveal spans even on error
       }
     }
 
