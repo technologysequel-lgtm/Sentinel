@@ -1401,7 +1401,7 @@
         <div class="proof-avatar pa3">S</div>
         <div class="proof-avatar pa4">M</div>
       </div>
-      <span id="proof-count-text">Be the first to join the waitlist</span>
+      <span id="proof-count-text" style="opacity:0;transition:opacity 0.3s ease"></span>
       <div class="proof-sep"></div>
       <span>🔒 No credit card. No spam.</span>
     </div>
@@ -1723,8 +1723,7 @@
           <button class="waitlist-btn" onclick="joinWaitlist('waitlist-email', 'waitlist-success-wrap')">Reserve My Spot
             →</button>
         </div>
-        <p class="waitlist-note">No credit card. No commitment. — <span id="waitlist-count-note">Be the first to
-            join.</span></p>
+        <p class="waitlist-note">No credit card. No commitment. — <span id="waitlist-count-note" style="opacity:0;transition:opacity 0.3s ease"></span></p>
       </div>
 
       <div class="success-message" id="waitlist-success-wrap">
@@ -1752,7 +1751,7 @@
     // ─────────────────────────────────────────────────────────────────────────
 
     // ── STATE ─────────────────────────────────────────────────────────────────
-    let liveCount = 247;           // real count from Google Sheets
+    let liveCount = 0;           // real count from Google Sheets
     let gasReady = false;       // true once GAS_URL is configured
 
     // ── COUNT HELPERS ─────────────────────────────────────────────────────────
@@ -1768,22 +1767,48 @@
         if (countNote) countNote.textContent = 'Be the first to join.';
       } else {
         if (proofText) proofText.innerHTML =
-          `Join <strong style="color:var(--text-primary)">${n}</strong> people on the waitlist`;
+          `Join <strong style="color:var(--text-primary)">${n}</strong> others in the waitlist`;
         if (countNote) countNote.textContent =
           `${n} people already waiting — join them.`;
       }
+      // Fade in now that the correct value is set
+      if (proofText) proofText.style.opacity = '1';
+      if (countNote) countNote.style.opacity = '1';
     }
 
-    // Fetch current count from Google Sheets via GAS on page load
+    // Fetch current count — stale-while-revalidate strategy
+    // 1. Show cached count instantly (no waiting)
+    // 2. Refresh from GAS in the background, update if changed
+    const CACHE_KEY = 'sentinel_wl_count';
+    const CACHE_TTL = 5 * 60 * 1000; // revalidate at most every 5 minutes
+
     async function fetchCount() {
-      if (!GAS_URL || GAS_URL === 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE') return;
+      // ── Step 1: Show cached value immediately ──────────────────────────────
+      try {
+        const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
+        if (cached && typeof cached.count === 'number') {
+          renderCount(cached.count); // instant — no network wait
+          // If cache is fresh enough, skip the network call entirely
+          if (Date.now() - cached.ts < CACHE_TTL) return;
+        }
+      } catch (_) { /* ignore parse errors */ }
+
+      // ── Step 2: Revalidate in the background ──────────────────────────────
+      if (!GAS_URL || GAS_URL === 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE') {
+        renderCount(0); // no GAS configured — show fallback
+        return;
+      }
       gasReady = true;
       try {
         const res = await fetch(GAS_URL, { method: 'GET' });
         const data = await res.json();
-        if (typeof data.count === 'number') renderCount(data.count);
+        if (typeof data.count === 'number') {
+          localStorage.setItem(CACHE_KEY, JSON.stringify({ count: data.count, ts: Date.now() }));
+          renderCount(data.count); // silently update UI if count changed
+        }
       } catch (_) {
-        // Silently fall back — no GAS yet
+        // Network failed — cached value (or fallback) is already shown, do nothing
+        renderCount(liveCount || 0);
       }
     }
 
